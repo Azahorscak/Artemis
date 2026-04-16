@@ -1,0 +1,7 @@
+upper: {{ upper .Initiator }}
+lower: {{ lower .GitBranch }}
+default-empty: {{ default "fallback" "" }}
+default-present: {{ default "fallback" .Version }}
+json: {{ toJson .Env }}
+yaml: {{ toYaml .Env }}
+env: {{ env "ARTEMIS_TEST_VAR" }}
