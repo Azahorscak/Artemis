@@ -1,0 +1,3 @@
+Commit: abc1234
+Branch: MAIN
+Dirty: false
