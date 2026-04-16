@@ -1,0 +1,10 @@
+# Compiled binaries
+/artemis
+/build/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
