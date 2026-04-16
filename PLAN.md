@@ -140,17 +140,33 @@ Notes:
   `result-artemis-output/`.
 
 ## 8. Implementation order (commits)
+
+Each step below is a single commit. Splitting rules applied: one package per
+commit when tests are independent; never leave a broken intermediate (the two
+flox build targets ship together); separate mechanical flag wiring from
+pipeline logic so review effort lands where bugs live.
+
 1. **Scaffolding** — `go.mod`, `cmd/artemis/main.go` stub,
    `assets/templates/example.txt.tmpl`, empty `internal/*`.
 2. **Renderer** — `internal/render` + unit tests (golden files).
 3. **Hasher** — `internal/hash` + unit test proving order-independence.
-4. **Git info + metadata** — `internal/gitinfo`, `internal/metadata` (with
-   the per-file-hash TODO), unit tests against a temp git repo.
-5. **Wire CLI** — flags, pipeline, error handling.
-6. **Flox manifest** — `.flox/env/manifest.toml` with the two build targets.
-7. **README** — usage, impurity note, how to add new templates.
-8. **Smoke test** — run `flox build artemis-output` end-to-end, verify
-   `metadata.json`.
+4. **Git info** — `internal/gitinfo`, unit tests against a temp git repo
+   (init, commit, dirty-tree) plus env-var fallback tests (`GIT_COMMIT`,
+   `GITHUB_SHA`).
+5. **Metadata writer** — `internal/metadata` struct + JSON writer matching
+   §5's schema, including the `// TODO(metadata): add outputs[]{path,sha256}`
+   marker. Depends on step 4 only for the `git` sub-object shape.
+6. **CLI flags + config** — `cmd/artemis/main.go` flag parsing,
+   env-var fallbacks for `--initiator`, `--version` ldflag plumbing,
+   `Config` struct the pipeline will consume. No execution yet.
+7. **CLI pipeline** — validate → walk → hash → gitinfo → metadata wiring
+   in `cmd/artemis`, fail-fast error handling, exit codes.
+8. **Flox manifest** — `.flox/env/manifest.toml` with both `[build.artemis]`
+   and `[build.artemis-output]` targets (kept together so no intermediate
+   commit is un-runnable).
+9. **README** — usage, impurity note, how to add new templates.
+10. **Smoke test** — run `flox build artemis-output` end-to-end, verify
+    `metadata.json`.
 
 ## 9. Resolved questions
 - **9.1 Templates path** — `assets/templates/`.
