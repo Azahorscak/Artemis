@@ -1,0 +1,31 @@
+version = 1
+
+[install]
+go.pkg-path  = "go"
+git.pkg-path = "git"
+
+[vars]
+ARTEMIS_TEMPLATES_DIR = "assets/templates"
+
+[build.artemis]
+description = "Artemis template renderer binary"
+command = '''
+  export GOCACHE="$FLOX_BUILD_CACHE/go-build"
+  export GOMODCACHE="$FLOX_BUILD_CACHE/go-mod"
+  mkdir -p "$out/bin"
+  go build -trimpath \
+    -ldflags "-X main.version=$(git rev-parse --short HEAD 2>/dev/null || echo dev)" \
+    -o "$out/bin/artemis" ./cmd/artemis
+'''
+
+[build.artemis-output]
+description = "Rendered templates + metadata.json"
+runtime-packages = ["artemis", "git"]
+command = '''
+  mkdir -p "$out"
+  artemis \
+    --templates-dir "./$ARTEMIS_TEMPLATES_DIR" \
+    --output-dir    "$out" \
+    --initiator     "${FLOX_BUILD_INITIATOR:-${USER:-flox}}"
+'''
+sandbox = "off"
