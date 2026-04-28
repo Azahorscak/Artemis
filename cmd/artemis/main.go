@@ -4,6 +4,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
+
+	"github.com/azahorscak/artemis/internal/gitinfo"
+	"github.com/azahorscak/artemis/internal/hash"
+	"github.com/azahorscak/artemis/internal/metadata"
+	"github.com/azahorscak/artemis/internal/render"
 )
 
 // version is set via ldflags at build time.
@@ -44,6 +50,48 @@ func defaultOutputDir() string {
 	return "./build"
 }
 
+// run executes the full pipeline: validate → hash → gitinfo → render → metadata.
+func run(cfg Config) error {
+	// 1. Validate inputs.
+	if _, err := os.Stat(cfg.TemplatesDir); err != nil {
+		return fmt.Errorf("templates dir: %w", err)
+	}
+	if err := os.MkdirAll(cfg.OutputDir, 0o755); err != nil {
+		return fmt.Errorf("creating output dir: %w", err)
+	}
+
+	// 2. Hash templates dir (source hash, computed on input before rendering).
+	sourceHash, err := hash.Dir(cfg.TemplatesDir)
+	if err != nil {
+		return fmt.Errorf("hashing templates: %w", err)
+	}
+
+	// 3. Collect git info so templates can reference commit/branch/dirty.
+	gi := gitinfo.Collect(".")
+
+	// 4. Render templates into output dir.
+	ctx := render.TemplateCtx{
+		GitCommit: gi.Commit,
+		GitBranch: gi.Branch,
+		GitDirty:  gi.Dirty,
+		Timestamp: time.Now().UTC(),
+		Initiator: cfg.Initiator,
+		Version:   cfg.Version,
+		Env:       nil,
+	}
+	if err := render.Render(cfg.TemplatesDir, cfg.OutputDir, ctx); err != nil {
+		return fmt.Errorf("rendering templates: %w", err)
+	}
+
+	// 5. Write metadata.json last so it is excluded from the source hash.
+	meta := metadata.New(cfg.Version, cfg.TemplatesDir, sourceHash, cfg.Initiator, gi)
+	if err := metadata.WriteFile(cfg.OutputDir, meta); err != nil {
+		return fmt.Errorf("writing metadata: %w", err)
+	}
+
+	return nil
+}
+
 func main() {
 	templatesDir := flag.String("templates-dir", "./assets/templates", "path to the templates directory")
 	outputDir := flag.String("output-dir", defaultOutputDir(), "path to the output directory")
@@ -64,10 +112,8 @@ func main() {
 		Version:      version,
 	}
 
-	// TODO(step7): wire up the execution pipeline using cfg.
-	fmt.Fprintf(os.Stderr, "artemis %s: config parsed, pipeline not yet wired\n", cfg.Version)
-	fmt.Fprintf(os.Stderr, "  templates-dir: %s\n", cfg.TemplatesDir)
-	fmt.Fprintf(os.Stderr, "  output-dir:    %s\n", cfg.OutputDir)
-	fmt.Fprintf(os.Stderr, "  initiator:     %s\n", cfg.Initiator)
-	os.Exit(1)
+	if err := run(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "artemis: %v\n", err)
+		os.Exit(1)
+	}
 }
