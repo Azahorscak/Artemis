@@ -50,7 +50,7 @@ func Dir(dir string) (string, error) {
 		}
 
 		entries = append(entries, entry{
-			relPath: filepath.ToSlash(rel),
+			relPath: filepath.ToSlash(rel), // normalize to forward-slash for cross-platform reproducibility
 			mode:    info.Mode(),
 			hash:    h,
 		})
@@ -60,12 +60,15 @@ func Dir(dir string) (string, error) {
 		return "", fmt.Errorf("walking directory %s: %w", dir, err)
 	}
 
+	// Sort by relative path so the hash is independent of filesystem walk order.
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].relPath < entries[j].relPath
 	})
 
 	aggregate := sha256.New()
 	for _, e := range entries {
+		// Each line encodes: "<relpath> <octal-mode> <sha256-hex>\n"
+		// Including the file mode means a chmod alone changes the aggregate hash.
 		fmt.Fprintf(aggregate, "%s %o %s\n", e.relPath, e.mode, e.hash)
 	}
 

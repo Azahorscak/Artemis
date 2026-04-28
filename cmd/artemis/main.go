@@ -17,18 +17,20 @@ var version = "dev"
 
 // Config holds the parsed CLI configuration the pipeline will consume.
 type Config struct {
-	TemplatesDir string
-	OutputDir    string
-	Initiator    string
-	Version      string
+	TemplatesDir string // path to the directory containing .tmpl and static files
+	OutputDir    string // destination directory for rendered output; created if absent
+	Initiator    string // identity of the build invoker, recorded in metadata.json
+	Version      string // binary version string injected via ldflags
 }
 
 // resolveInitiator returns the first non-empty value from the --initiator flag,
 // a chain of environment variables, or "unknown" as a last resort.
+// Priority: --initiator flag > FLOX_BUILD_INITIATOR > GITHUB_ACTOR > CI_JOB_NAME > USER > "unknown"
 func resolveInitiator(flagVal string) string {
 	if flagVal != "" {
 		return flagVal
 	}
+	// Walk well-known CI/system env vars from most-specific to least-specific.
 	for _, env := range []string{
 		"FLOX_BUILD_INITIATOR",
 		"GITHUB_ACTOR",
@@ -43,6 +45,7 @@ func resolveInitiator(flagVal string) string {
 }
 
 // defaultOutputDir returns $out if set, otherwise "./build".
+// $out is the standard Nix/Flox build output path injected at build time.
 func defaultOutputDir() string {
 	if v := os.Getenv("out"); v != "" {
 		return v
@@ -77,7 +80,7 @@ func run(cfg Config) error {
 		Timestamp: time.Now().UTC(),
 		Initiator: cfg.Initiator,
 		Version:   cfg.Version,
-		Env:       nil,
+		Env:       nil, // no explicit env allowlist; templates may still call the env() helper
 	}
 	if err := render.Render(cfg.TemplatesDir, cfg.OutputDir, ctx); err != nil {
 		return fmt.Errorf("rendering templates: %w", err)
