@@ -50,7 +50,7 @@ func defaultOutputDir() string {
 	return "./build"
 }
 
-// run executes the full pipeline: validate → hash → gitinfo → render → metadata.
+// run executes the full pipeline: validate → timestamp → hash → gitinfo → render → metadata.
 func run(cfg Config) error {
 	// 1. Validate inputs.
 	if _, err := os.Stat(cfg.TemplatesDir); err != nil {
@@ -60,31 +60,34 @@ func run(cfg Config) error {
 		return fmt.Errorf("creating output dir: %w", err)
 	}
 
-	// 2. Hash templates dir (source hash, computed on input before rendering).
+	// 2. Capture build time once so templates and metadata.json share the same timestamp.
+	now := time.Now().UTC()
+
+	// 3. Hash templates dir (source hash, computed on input before rendering).
 	sourceHash, err := hash.Dir(cfg.TemplatesDir)
 	if err != nil {
 		return fmt.Errorf("hashing templates: %w", err)
 	}
 
-	// 3. Collect git info so templates can reference commit/branch/dirty.
+	// 4. Collect git info so templates can reference commit/branch/dirty.
 	gi := gitinfo.Collect(".")
 
-	// 4. Render templates into output dir.
+	// 5. Render templates into output dir.
 	ctx := render.TemplateCtx{
 		GitCommit: gi.Commit,
 		GitBranch: gi.Branch,
 		GitDirty:  gi.Dirty,
-		Timestamp: time.Now().UTC(),
+		Timestamp: now,
 		Initiator: cfg.Initiator,
 		Version:   cfg.Version,
-		Env:       nil,
+		Env:       nil, // nil: env "KEY" falls back to os.Getenv; populate to restrict access
 	}
 	if err := render.Render(cfg.TemplatesDir, cfg.OutputDir, ctx); err != nil {
 		return fmt.Errorf("rendering templates: %w", err)
 	}
 
-	// 5. Write metadata.json last so it is excluded from the source hash.
-	meta := metadata.New(cfg.Version, cfg.TemplatesDir, sourceHash, cfg.Initiator, gi)
+	// 6. Write metadata.json last so it is excluded from the source hash.
+	meta := metadata.New(cfg.Version, cfg.TemplatesDir, sourceHash, cfg.Initiator, gi, now)
 	if err := metadata.WriteFile(cfg.OutputDir, meta); err != nil {
 		return fmt.Errorf("writing metadata: %w", err)
 	}

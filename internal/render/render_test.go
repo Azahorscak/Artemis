@@ -17,12 +17,10 @@ var testCtx = TemplateCtx{
 	Timestamp: time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC),
 	Initiator: "tester",
 	Version:   "0.1.0-test",
-	Env:       map[string]string{"APP_ENV": "test"},
+	Env:       map[string]string{"APP_ENV": "test", "ARTEMIS_TEST_VAR": "hello-from-test"},
 }
 
 func TestRender(t *testing.T) {
-	t.Setenv("ARTEMIS_TEST_VAR", "hello-from-test")
-
 	templatesDir := filepath.Join("testdata", "templates")
 	goldenDir := filepath.Join("testdata", "golden")
 	outputDir := t.TempDir()

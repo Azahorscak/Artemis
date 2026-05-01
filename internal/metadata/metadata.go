@@ -47,8 +47,7 @@ type Build struct {
 }
 
 // New creates a Metadata value from the provided inputs.
-// The timestamp is set to the current UTC time in RFC 3339 format.
-func New(version, templatesDir, hash, initiator string, gi gitinfo.Info) Metadata {
+func New(version, templatesDir, hash, initiator string, gi gitinfo.Info, timestamp time.Time) Metadata {
 	return Metadata{
 		SchemaVersion: 1,
 		Tool: Tool{
@@ -65,7 +64,7 @@ func New(version, templatesDir, hash, initiator string, gi gitinfo.Info) Metadat
 			Dirty:  gi.Dirty,
 		},
 		Build: Build{
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Timestamp: timestamp.UTC().Format(time.RFC3339),
 			Initiator: initiator,
 		},
 	}

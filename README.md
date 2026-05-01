@@ -61,7 +61,7 @@ Every template receives a `TemplateCtx` struct:
 | `Timestamp`  | `time.Time`         | Build time (UTC)                             |
 | `Initiator`  | `string`            | Build initiator identity                     |
 | `Version`    | `string`            | Binary version (from ldflags)                |
-| `Env`        | `map[string]string` | Allowlisted environment variables            |
+| `Env`        | `map[string]string` | When non-nil, restricts `env "KEY"` to this map; when nil, `env` reads from the process environment |
 
 ### Helper functions
 

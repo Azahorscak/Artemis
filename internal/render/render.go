@@ -27,7 +27,9 @@ type TemplateCtx struct {
 }
 
 // FuncMap returns the helper functions registered for templates.
-func FuncMap() template.FuncMap {
+// When env is non-nil, the "env" helper reads from that map (allowlist).
+// When env is nil, "env" falls back to os.Getenv.
+func FuncMap(env map[string]string) template.FuncMap {
 	return template.FuncMap{
 		"upper": strings.ToUpper,
 		"lower": strings.ToLower,
@@ -51,7 +53,12 @@ func FuncMap() template.FuncMap {
 			}
 			return string(b), nil
 		},
-		"env": os.Getenv,
+		"env": func(key string) string {
+			if env != nil {
+				return env[key]
+			}
+			return os.Getenv(key)
+		},
 	}
 }
 
@@ -89,7 +96,7 @@ func Render(templatesDir, outputDir string, ctx TemplateCtx) error {
 }
 
 func renderTemplate(src, dst string, mode fs.FileMode, ctx TemplateCtx) error {
-	tmpl, err := template.New(filepath.Base(src)).Funcs(FuncMap()).ParseFiles(src)
+	tmpl, err := template.New(filepath.Base(src)).Funcs(FuncMap(ctx.Env)).ParseFiles(src)
 	if err != nil {
 		return fmt.Errorf("parsing template %s: %w", src, err)
 	}

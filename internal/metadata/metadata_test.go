@@ -10,15 +10,17 @@ import (
 	"github.com/azahorscak/artemis/internal/gitinfo"
 )
 
+var fixedTime = time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC)
+
 func TestNew_SchemaVersion(t *testing.T) {
-	m := New("0.1.0", "assets/templates", "sha256:abc", "alice", gitinfo.Info{})
+	m := New("0.1.0", "assets/templates", "sha256:abc", "alice", gitinfo.Info{}, fixedTime)
 	if m.SchemaVersion != 1 {
 		t.Errorf("SchemaVersion = %d, want 1", m.SchemaVersion)
 	}
 }
 
 func TestNew_Tool(t *testing.T) {
-	m := New("1.2.3", "assets/templates", "sha256:abc", "alice", gitinfo.Info{})
+	m := New("1.2.3", "assets/templates", "sha256:abc", "alice", gitinfo.Info{}, fixedTime)
 	if m.Tool.Name != "artemis" {
 		t.Errorf("Tool.Name = %q, want %q", m.Tool.Name, "artemis")
 	}
@@ -28,7 +30,7 @@ func TestNew_Tool(t *testing.T) {
 }
 
 func TestNew_Source(t *testing.T) {
-	m := New("0.1.0", "assets/templates", "sha256:deadbeef", "alice", gitinfo.Info{})
+	m := New("0.1.0", "assets/templates", "sha256:deadbeef", "alice", gitinfo.Info{}, fixedTime)
 	if m.Source.TemplatesDir != "assets/templates" {
 		t.Errorf("Source.TemplatesDir = %q, want %q", m.Source.TemplatesDir, "assets/templates")
 	}
@@ -43,7 +45,7 @@ func TestNew_Git(t *testing.T) {
 		Branch: "main",
 		Dirty:  true,
 	}
-	m := New("0.1.0", "assets/templates", "sha256:abc", "alice", gi)
+	m := New("0.1.0", "assets/templates", "sha256:abc", "alice", gi, fixedTime)
 	if m.Git.Commit != "abc123" {
 		t.Errorf("Git.Commit = %q, want %q", m.Git.Commit, "abc123")
 	}
@@ -56,20 +58,13 @@ func TestNew_Git(t *testing.T) {
 }
 
 func TestNew_Build(t *testing.T) {
-	before := time.Now().UTC().Truncate(time.Second)
-	m := New("0.1.0", "assets/templates", "sha256:abc", "flox-build:alice", gitinfo.Info{})
-	after := time.Now().UTC().Truncate(time.Second).Add(time.Second)
+	m := New("0.1.0", "assets/templates", "sha256:abc", "flox-build:alice", gitinfo.Info{}, fixedTime)
 
 	if m.Build.Initiator != "flox-build:alice" {
 		t.Errorf("Build.Initiator = %q, want %q", m.Build.Initiator, "flox-build:alice")
 	}
-
-	ts, err := time.Parse(time.RFC3339, m.Build.Timestamp)
-	if err != nil {
-		t.Fatalf("Build.Timestamp %q is not valid RFC3339: %v", m.Build.Timestamp, err)
-	}
-	if ts.Before(before) || ts.After(after) {
-		t.Errorf("Build.Timestamp %v not between %v and %v", ts, before, after)
+	if m.Build.Timestamp != "2026-04-15T12:00:00Z" {
+		t.Errorf("Build.Timestamp = %q, want %q", m.Build.Timestamp, "2026-04-15T12:00:00Z")
 	}
 }
 
@@ -181,7 +176,7 @@ func TestWriteFile_ErrorOnBadDir(t *testing.T) {
 
 func TestNew_GitDirtyFalse(t *testing.T) {
 	gi := gitinfo.Info{Commit: "abc", Branch: "main", Dirty: false}
-	m := New("0.1.0", "assets/templates", "sha256:abc", "alice", gi)
+	m := New("0.1.0", "assets/templates", "sha256:abc", "alice", gi, fixedTime)
 	if m.Git.Dirty {
 		t.Error("Git.Dirty = true, want false")
 	}
@@ -191,7 +186,7 @@ func TestWriteFile_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 
 	gi := gitinfo.Info{Commit: "deadbeef", Branch: "feature/x", Dirty: true}
-	original := New("2.0.0", "my/templates", "sha256:cafebabe", "ci-bot", gi)
+	original := New("2.0.0", "my/templates", "sha256:cafebabe", "ci-bot", gi, fixedTime)
 
 	if err := WriteFile(dir, original); err != nil {
 		t.Fatalf("WriteFile() error: %v", err)
@@ -207,7 +202,7 @@ func TestWriteFile_RoundTrip(t *testing.T) {
 		t.Fatalf("unmarshalling metadata.json: %v", err)
 	}
 
-	// Compare all fields except timestamp (tested separately).
+	// Compare all fields.
 	if roundTripped.SchemaVersion != original.SchemaVersion {
 		t.Errorf("SchemaVersion = %d, want %d", roundTripped.SchemaVersion, original.SchemaVersion)
 	}

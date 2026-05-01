@@ -2,6 +2,7 @@ upper: TESTER
 lower: main
 default-empty: fallback
 default-present: 0.1.0-test
-json: {"APP_ENV":"test"}
+json: {"APP_ENV":"test","ARTEMIS_TEST_VAR":"hello-from-test"}
 yaml: APP_ENV: test
+ARTEMIS_TEST_VAR: hello-from-test
 env: hello-from-test
