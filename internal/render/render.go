@@ -16,27 +16,33 @@ import (
 )
 
 // TemplateCtx holds the data available to every template.
+// All fields are exported so text/template can access them by name (e.g. {{.GitCommit}}).
 type TemplateCtx struct {
-	GitCommit string
-	GitBranch string
-	GitDirty  bool
-	Timestamp time.Time
-	Initiator string
-	Version   string
-	Env       map[string]string
+	GitCommit string            // full SHA-1 commit hash, or empty if unavailable
+	GitBranch string            // branch name (e.g. "main"), or empty on detached HEAD
+	GitDirty  bool              // true when the working tree has uncommitted changes
+	Timestamp time.Time         // UTC build time; use {{.Timestamp.Format "2006-01-02"}} in templates
+	Initiator string            // identity of whoever triggered the build
+	Version   string            // binary version string set via ldflags
+	Env       map[string]string // optional allowlisted env vars; nil means none pre-populated
 }
 
 // FuncMap returns the helper functions registered for templates.
+// These are available in every .tmpl file via the standard {{call}} syntax.
 func FuncMap() template.FuncMap {
 	return template.FuncMap{
+		// upper / lower: {{.GitBranch | upper}}
 		"upper": strings.ToUpper,
 		"lower": strings.ToLower,
+		// default: returns def when val is empty — {{.Version | default "dev"}}
 		"default": func(def, val string) string {
 			if val == "" {
 				return def
 			}
 			return val
 		},
+		// toYaml: marshals any value to a YAML string without a trailing newline.
+		// Useful for embedding structured data in YAML templates.
 		"toYaml": func(v any) (string, error) {
 			b, err := yaml.Marshal(v)
 			if err != nil {
@@ -44,6 +50,8 @@ func FuncMap() template.FuncMap {
 			}
 			return strings.TrimSuffix(string(b), "\n"), nil
 		},
+		// toJson: marshals any value to a compact JSON string.
+		// Useful for embedding structured data in JSON or shell templates.
 		"toJson": func(v any) (string, error) {
 			b, err := json.Marshal(v)
 			if err != nil {
@@ -51,6 +59,7 @@ func FuncMap() template.FuncMap {
 			}
 			return string(b), nil
 		},
+		// env: reads an environment variable at render time — {{env "HOME"}}
 		"env": os.Getenv,
 	}
 }
@@ -80,14 +89,18 @@ func Render(templatesDir, outputDir string, ctx TemplateCtx) error {
 		}
 
 		if strings.HasSuffix(path, ".tmpl") {
+			// Strip the .tmpl extension so "foo.txt.tmpl" becomes "foo.txt" in the output.
 			destPath = strings.TrimSuffix(destPath, ".tmpl")
 			return renderTemplate(path, destPath, info.Mode(), ctx)
 		}
 
+		// Non-template files are copied verbatim (images, scripts, etc.).
 		return copyFile(path, destPath, info.Mode())
 	})
 }
 
+// renderTemplate parses src as a Go text/template and executes it with ctx,
+// writing the result to dst with the original file mode preserved.
 func renderTemplate(src, dst string, mode fs.FileMode, ctx TemplateCtx) error {
 	tmpl, err := template.New(filepath.Base(src)).Funcs(FuncMap()).ParseFiles(src)
 	if err != nil {
@@ -111,6 +124,7 @@ func renderTemplate(src, dst string, mode fs.FileMode, ctx TemplateCtx) error {
 	return nil
 }
 
+// copyFile copies src to dst byte-for-byte, preserving the original file mode.
 func copyFile(src, dst string, mode fs.FileMode) error {
 	in, err := os.Open(src)
 	if err != nil {
