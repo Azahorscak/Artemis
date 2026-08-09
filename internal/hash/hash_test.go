@@ -143,6 +143,24 @@ func TestDir_EmptyDirectory(t *testing.T) {
 	}
 }
 
+func TestDir_RejectsSymlink(t *testing.T) {
+	// Hashing must not read through a symlink: the digest would then cover a
+	// file outside dir, and would change when that unrelated file changed.
+	secretDir := t.TempDir()
+	secret := filepath.Join(secretDir, "secret.txt")
+	writeFile(t, secret, "TOP-SECRET", 0o600)
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "real.txt"), "content", 0o644)
+	if err := os.Symlink(secret, filepath.Join(dir, "link.txt")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	if _, err := Dir(dir); err == nil {
+		t.Fatal("expected error for symlink in hashed dir, got nil")
+	}
+}
+
 func TestDir_Subdirectories(t *testing.T) {
 	// Files in subdirectories use forward-slash relative paths,
 	// so the same layout in two temp dirs must hash identically.

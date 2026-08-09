@@ -153,6 +153,99 @@ func TestRender_BadTemplate(t *testing.T) {
 	}
 }
 
+func TestRender_RejectsSymlinkInTemplates(t *testing.T) {
+	// A symlink in the templates tree must not be read through: doing so copies
+	// a file from outside templatesDir into the output.
+	secretDir := t.TempDir()
+	secret := filepath.Join(secretDir, "secret.txt")
+	if err := os.WriteFile(secret, []byte("TOP-SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tmpTemplates := t.TempDir()
+	outputDir := t.TempDir()
+	if err := os.Symlink(secret, filepath.Join(tmpTemplates, "leak.txt")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	if err := Render(tmpTemplates, outputDir, testCtx); err == nil {
+		t.Fatal("expected error for symlink in templates dir, got nil")
+	}
+
+	if got, err := os.ReadFile(filepath.Join(outputDir, "leak.txt")); err == nil {
+		t.Errorf("symlink target was copied into output: %q", got)
+	}
+}
+
+func TestRender_DoesNotWriteThroughOutputSymlink(t *testing.T) {
+	// A symlink planted in the output dir must not redirect a rendered file to
+	// its target.
+	victimDir := t.TempDir()
+	victim := filepath.Join(victimDir, "victim.txt")
+	if err := os.WriteFile(victim, []byte("ORIGINAL"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tmpTemplates := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpTemplates, "x.txt.tmpl"), []byte("RENDERED"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outputDir := t.TempDir()
+	if err := os.Symlink(victim, filepath.Join(outputDir, "x.txt")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	if err := Render(tmpTemplates, outputDir, testCtx); err != nil {
+		t.Fatalf("Render() error: %v", err)
+	}
+
+	got, err := os.ReadFile(victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "ORIGINAL" {
+		t.Errorf("file outside outputDir was overwritten: got %q, want %q", got, "ORIGINAL")
+	}
+
+	// The rendered content must land at the real path inside outputDir.
+	got, err = os.ReadFile(filepath.Join(outputDir, "x.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "RENDERED" {
+		t.Errorf("output content mismatch: got %q, want %q", got, "RENDERED")
+	}
+}
+
+func TestRender_OverwritesExistingRegularFile(t *testing.T) {
+	// createOutput unlinks before creating with O_EXCL; rendering twice into the
+	// same directory must still succeed.
+	tmpTemplates := t.TempDir()
+	if err := os.WriteFile(filepath.Join(tmpTemplates, "out.txt.tmpl"), []byte("v2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outputDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outputDir, "out.txt"), []byte("v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 2; i++ {
+		if err := Render(tmpTemplates, outputDir, testCtx); err != nil {
+			t.Fatalf("Render() run %d error: %v", i+1, err)
+		}
+	}
+
+	got, err := os.ReadFile(filepath.Join(outputDir, "out.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "v2" {
+		t.Errorf("existing file not replaced: got %q, want %q", got, "v2")
+	}
+}
+
 func TestRender_MissingTemplatesDir(t *testing.T) {
 	outputDir := t.TempDir()
 

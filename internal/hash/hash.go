@@ -34,6 +34,15 @@ func Dir(dir string) (string, error) {
 			return nil
 		}
 
+		// WalkDir reports symlinks without following them, so an entry can be a
+		// symlink, device, socket or FIFO. fileHash opens by path and would read
+		// *through* such an entry, folding a file from outside dir into the
+		// digest. Fail rather than skip: a digest that silently omits part of the
+		// tree is worse than no digest. render.Render rejects the same entries.
+		if !d.Type().IsRegular() {
+			return fmt.Errorf("refusing to hash irregular file %s (mode %v)", path, d.Type())
+		}
+
 		rel, err := filepath.Rel(dir, path)
 		if err != nil {
 			return fmt.Errorf("computing relative path: %w", err)
