@@ -37,8 +37,15 @@ type Source struct {
 // Git captures the repository state at build time for traceability.
 type Git struct {
 	Commit string `json:"commit"` // full SHA-1, or empty when git is unavailable
-	Branch string `json:"branch"` // branch name, or empty on detached HEAD / no git
-	Dirty  bool   `json:"dirty"`  // true when uncommitted changes existed at build time
+	// CommitSource is "git" when git reported the commit, "env:<VAR>" when it
+	// came from an environment variable (unverified), or "unknown".
+	CommitSource string `json:"commitSource"`
+	Branch       string `json:"branch"` // branch name, or empty on detached HEAD / no git
+	// Dirty reports whether uncommitted changes existed at build time, and is
+	// serialised as null when that could not be determined. It deliberately has
+	// no omitempty: an absent field reads as "clean" to a consumer, which is the
+	// false provenance claim this distinction exists to avoid.
+	Dirty *bool `json:"dirty"`
 }
 
 // Build holds information about when and by whom the output was produced.
@@ -61,15 +68,26 @@ func New(version, templatesDir, hash, initiator string, gi gitinfo.Info) Metadat
 			Hash:         hash,
 		},
 		Git: Git{
-			Commit: gi.Commit,
-			Branch: gi.Branch,
-			Dirty:  gi.Dirty,
+			Commit:       gi.Commit,
+			CommitSource: gi.CommitSource,
+			Branch:       gi.Branch,
+			Dirty:        copyBool(gi.Dirty),
 		},
 		Build: Build{
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 			Initiator: initiator,
 		},
 	}
+}
+
+// copyBool returns a new pointer to the same value, so the returned Metadata
+// does not alias the caller's gitinfo.Info.
+func copyBool(b *bool) *bool {
+	if b == nil {
+		return nil
+	}
+	v := *b
+	return &v
 }
 
 // WriteFile writes the metadata as indented JSON to outputDir/metadata.json.

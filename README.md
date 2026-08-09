@@ -53,15 +53,30 @@ flox build artemis-output   # render templates; result lands in result-artemis-o
 
 Every template receives a `TemplateCtx` struct:
 
-| Field        | Type                | Description                                  |
-|--------------|---------------------|----------------------------------------------|
-| `GitCommit`  | `string`            | Full commit SHA (or env-var fallback)        |
-| `GitBranch`  | `string`            | Branch name                                  |
-| `GitDirty`   | `bool`              | `true` if the working tree has uncommitted changes |
-| `Timestamp`  | `time.Time`         | Build time (UTC)                             |
-| `Initiator`  | `string`            | Build initiator identity                     |
-| `Version`    | `string`            | Binary version (from ldflags)                |
-| `Env`        | `map[string]string` | Allowlisted environment variables            |
+| Field             | Type                | Description                                  |
+|-------------------|---------------------|----------------------------------------------|
+| `GitCommit`       | `string`            | Full commit SHA (or env-var fallback)        |
+| `GitCommitSource` | `string`            | `git`, `env:<VAR>`, or `unknown` — see below  |
+| `GitBranch`       | `string`            | Branch name                                  |
+| `GitDirty`        | `bool`              | `true` only if the tree was inspected and found dirty |
+| `GitDirtyKnown`   | `bool`              | `false` if the working-tree state could not be determined |
+| `Timestamp`       | `time.Time`         | Build time (UTC)                             |
+| `Initiator`       | `string`            | Build initiator identity                     |
+| `Version`         | `string`            | Binary version (from ldflags)                |
+| `Env`             | `map[string]string` | Allowlisted environment variables            |
+
+`GitDirty` is `false` both for a clean tree and for one Artemis could not
+inspect, so `{{ if .GitDirty }}` never claims a tree is dirty on unknown
+information. Check `GitDirtyKnown` to tell the two cases apart:
+
+```
+dirty: {{ if .GitDirtyKnown }}{{ .GitDirty }}{{ else }}unknown{{ end }}
+```
+
+`GitCommitSource` is `git` when git itself reported the commit. When git was
+unavailable and the commit came from `GIT_COMMIT` or `GITHUB_SHA` it is
+`env:GIT_COMMIT` / `env:GITHUB_SHA`, and the value is **unverified** — nothing
+confirms it describes the tree actually being built.
 
 ### Helper functions
 
@@ -98,14 +113,28 @@ After a successful run the output directory contains:
   "schemaVersion": 1,
   "tool":   { "name": "artemis", "version": "0.1.0" },
   "source": { "templatesDir": "assets/templates", "hash": "sha256:..." },
-  "git":    { "commit": "abcdef...", "branch": "main", "dirty": false },
+  "git":    { "commit": "abcdef...", "commitSource": "git", "branch": "main", "dirty": false },
   "build":  { "timestamp": "2026-04-15T12:34:56Z", "initiator": "alice" }
 }
 ```
 
+`git.dirty` is `true`, `false`, or **`null`**. `null` means the working-tree
+state could not be determined — git missing, or the directory is not a
+repository. It is deliberately not collapsed to `false`: reporting a clean tree
+that was never inspected would be a false provenance claim. Consumers that gate
+on cleanliness should treat `null` as "not verified clean", not as "clean".
+
+`git.commitSource` records where `git.commit` came from (`git`, `env:<VAR>`, or
+`unknown`). An `env:` commit is unverified — see [Template context](#template-context).
+
 `source.hash` is a single aggregate SHA-256 computed over a sorted list of
 `(relpath, mode, sha256(content))` tuples for every file in the templates
-directory.
+directory. Each record length-prefixes the relative path
+(`<len>:<relpath> <mode> <sha256>`), so paths containing spaces or newlines
+cannot be crafted to imitate the records of other files, and the digest is
+domain-separated by a format-version header. Symlinks and other irregular files
+are rejected rather than followed, so the digest only ever covers regular files
+inside the templates directory.
 
 ## Impurity note
 

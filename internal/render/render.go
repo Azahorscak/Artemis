@@ -19,13 +19,27 @@ import (
 // TemplateCtx holds the data available to every template.
 // All fields are exported so text/template can access them by name (e.g. {{.GitCommit}}).
 type TemplateCtx struct {
-	GitCommit string            // full SHA-1 commit hash, or empty if unavailable
-	GitBranch string            // branch name (e.g. "main"), or empty on detached HEAD
-	GitDirty  bool              // true when the working tree has uncommitted changes
-	Timestamp time.Time         // UTC build time; use {{.Timestamp.Format "2006-01-02"}} in templates
-	Initiator string            // identity of whoever triggered the build
-	Version   string            // binary version string set via ldflags
-	Env       map[string]string // optional allowlisted env vars; nil means none pre-populated
+	GitCommit string // full SHA-1 commit hash, or empty if unavailable
+	// GitCommitSource records where GitCommit came from: "git", "env:<VAR>"
+	// when an environment variable supplied it (unverified — nothing confirms
+	// it describes this tree), or "unknown".
+	GitCommitSource string
+	GitBranch       string // branch name (e.g. "main"), or empty on detached HEAD
+	// GitDirty is true only when the working tree was inspected and found
+	// dirty. It is false both for a clean tree and for one that could not be
+	// inspected, so {{.GitDirty}} never asserts "dirty" on unknown information.
+	// Templates that must tell those two cases apart check GitDirtyKnown, which
+	// is false only when the state is undetermined.
+	//
+	// This is deliberately a pair of bools rather than a *bool: text/template
+	// treats any non-nil pointer as truthy, so with a *bool a clean tree would
+	// make {{if .GitDirty}} report it as dirty.
+	GitDirty      bool
+	GitDirtyKnown bool
+	Timestamp     time.Time         // UTC build time; use {{.Timestamp.Format "2006-01-02"}} in templates
+	Initiator     string            // identity of whoever triggered the build
+	Version       string            // binary version string set via ldflags
+	Env           map[string]string // optional allowlisted env vars; nil means none pre-populated
 }
 
 // FuncMap returns the helper functions registered for templates.

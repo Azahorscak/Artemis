@@ -1,6 +1,8 @@
 package hash
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
@@ -183,5 +185,60 @@ func TestDir_Subdirectories(t *testing.T) {
 
 	if hashA != hashB {
 		t.Errorf("subdirectory order independence failed: %s vs %s", hashA, hashB)
+	}
+}
+
+func TestDir_PathFramingIsNotForgeable(t *testing.T) {
+	// A file whose *name* embeds what looks like a complete second record must
+	// not hash the same as the two ordinary files that record describes.
+	// Before the length prefix these two trees collided.
+	emptySHA := hex.EncodeToString(sha256.New().Sum(nil))
+
+	forged := t.TempDir()
+	name := "a 644 " + emptySHA + "\nb"
+	if err := os.WriteFile(filepath.Join(forged, name), []byte("HELLO"), 0o644); err != nil {
+		t.Skipf("filesystem rejected adversarial filename: %v", err)
+	}
+
+	ordinary := t.TempDir()
+	writeFile(t, filepath.Join(ordinary, "a"), "", 0o644)
+	writeFile(t, filepath.Join(ordinary, "b"), "HELLO", 0o644)
+
+	forgedHash, err := Dir(forged)
+	if err != nil {
+		t.Fatalf("hashing forged tree: %v", err)
+	}
+	ordinaryHash, err := Dir(ordinary)
+	if err != nil {
+		t.Fatalf("hashing ordinary tree: %v", err)
+	}
+
+	if forgedHash == ordinaryHash {
+		t.Errorf("distinct trees collided: both hashed to %s", forgedHash)
+	}
+}
+
+func TestDir_PathBoundaryIsUnambiguous(t *testing.T) {
+	// Two trees whose concatenated path bytes are identical but split
+	// differently. Only the length prefix keeps them apart.
+	a := t.TempDir()
+	writeFile(t, filepath.Join(a, "ab"), "x", 0o644)
+	writeFile(t, filepath.Join(a, "c"), "x", 0o644)
+
+	b := t.TempDir()
+	writeFile(t, filepath.Join(b, "a"), "x", 0o644)
+	writeFile(t, filepath.Join(b, "bc"), "x", 0o644)
+
+	hashA, err := Dir(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashB, err := Dir(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if hashA == hashB {
+		t.Errorf("different path splits collided: both hashed to %s", hashA)
 	}
 }
