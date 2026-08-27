@@ -52,6 +52,17 @@ func run(t *testing.T, dir string, name string, args ...string) string {
 	}()])
 }
 
+// fmtDirty renders a tri-state Dirty value for test failure messages.
+func fmtDirty(d *bool) string {
+	if d == nil {
+		return "unknown"
+	}
+	if *d {
+		return "true"
+	}
+	return "false"
+}
+
 // ---------- git-based tests ----------
 
 func TestCollect_CleanRepo(t *testing.T) {
@@ -63,8 +74,11 @@ func TestCollect_CleanRepo(t *testing.T) {
 	if info.Commit != sha {
 		t.Errorf("Commit = %q, want %q", info.Commit, sha)
 	}
-	if info.Dirty {
-		t.Error("expected clean tree, got Dirty=true")
+	if info.Dirty == nil || *info.Dirty {
+		t.Errorf("expected clean tree, got Dirty=%v", fmtDirty(info.Dirty))
+	}
+	if info.CommitSource != SourceGit {
+		t.Errorf("CommitSource = %q, want %q", info.CommitSource, SourceGit)
 	}
 }
 
@@ -79,8 +93,8 @@ func TestCollect_DirtyTree(t *testing.T) {
 
 	info := Collect(dir)
 
-	if !info.Dirty {
-		t.Error("expected Dirty=true after modifying tracked file")
+	if info.Dirty == nil || !*info.Dirty {
+		t.Errorf("expected Dirty=true after modifying tracked file, got %v", fmtDirty(info.Dirty))
 	}
 }
 
@@ -95,8 +109,8 @@ func TestCollect_UntrackedFile(t *testing.T) {
 
 	info := Collect(dir)
 
-	if !info.Dirty {
-		t.Error("expected Dirty=true with untracked file")
+	if info.Dirty == nil || !*info.Dirty {
+		t.Errorf("expected Dirty=true with untracked file, got %v", fmtDirty(info.Dirty))
 	}
 }
 
@@ -180,8 +194,12 @@ func TestCollect_NoGitNoEnv(t *testing.T) {
 	if info.Branch != "" {
 		t.Errorf("Branch = %q, want empty string", info.Branch)
 	}
-	if info.Dirty {
-		t.Error("expected Dirty=false when git is unavailable")
+	// Not false: git never ran, so the tree state is genuinely unknown.
+	if info.Dirty != nil {
+		t.Errorf("expected Dirty=nil when git is unavailable, got %v", *info.Dirty)
+	}
+	if info.CommitSource != SourceUnknown {
+		t.Errorf("CommitSource = %q, want %q", info.CommitSource, SourceUnknown)
 	}
 }
 
@@ -195,5 +213,55 @@ func TestCollect_GitRepoTakesPrecedenceOverEnv(t *testing.T) {
 
 	if info.Commit != sha {
 		t.Errorf("Commit = %q, want %q (git should take precedence over env)", info.Commit, sha)
+	}
+}
+
+// ---------- provenance-integrity tests ----------
+
+func TestCollect_DirtyUnknownWhenGitUnavailable(t *testing.T) {
+	// A genuinely dirty tree, inspected with git off PATH. Dirty must report
+	// "unknown" rather than "clean": claiming a clean tree that was never
+	// examined is a false provenance claim in metadata.json.
+	dir := initRepo(t)
+	commitFile(t, dir, "hello.txt", "hello", "initial commit")
+	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("uncommitted"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sanity check: git agrees the tree is dirty before we hide it.
+	if info := Collect(dir); info.Dirty == nil || !*info.Dirty {
+		t.Fatalf("precondition failed: tree should be dirty, got %v", fmtDirty(info.Dirty))
+	}
+
+	t.Setenv("PATH", filepath.Join(t.TempDir(), "empty"))
+	t.Setenv("GIT_COMMIT", "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+
+	info := Collect(dir)
+	if info.Dirty != nil {
+		t.Errorf("Dirty = %v for a dirty tree git could not inspect, want unknown", *info.Dirty)
+	}
+}
+
+func TestCollect_CommitSourceRecordsEnvFallback(t *testing.T) {
+	for _, tc := range []struct {
+		name, set, value, wantSource string
+	}{
+		{"GIT_COMMIT", "GIT_COMMIT", "abc123", SourceEnvPrefix + "GIT_COMMIT"},
+		{"GITHUB_SHA", "GITHUB_SHA", "def456", SourceEnvPrefix + "GITHUB_SHA"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir() // not a git repo
+			t.Setenv("GIT_COMMIT", "")
+			t.Setenv("GITHUB_SHA", "")
+			t.Setenv(tc.set, tc.value)
+
+			info := Collect(dir)
+			if info.Commit != tc.value {
+				t.Errorf("Commit = %q, want %q", info.Commit, tc.value)
+			}
+			if info.CommitSource != tc.wantSource {
+				t.Errorf("CommitSource = %q, want %q", info.CommitSource, tc.wantSource)
+			}
+		})
 	}
 }

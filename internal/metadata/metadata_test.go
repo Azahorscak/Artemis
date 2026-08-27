@@ -10,6 +10,17 @@ import (
 	"github.com/azahorscak/artemis/internal/gitinfo"
 )
 
+// boolPtr returns a pointer to v, for building tri-state Dirty values.
+func boolPtr(v bool) *bool { return &v }
+
+// sameDirty compares two tri-state Dirty values by value, not by pointer.
+func sameDirty(a, b *bool) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
 func TestNew_SchemaVersion(t *testing.T) {
 	m := New("0.1.0", "assets/templates", "sha256:abc", "alice", gitinfo.Info{})
 	if m.SchemaVersion != 1 {
@@ -39,9 +50,10 @@ func TestNew_Source(t *testing.T) {
 
 func TestNew_Git(t *testing.T) {
 	gi := gitinfo.Info{
-		Commit: "abc123",
-		Branch: "main",
-		Dirty:  true,
+		Commit:       "abc123",
+		CommitSource: gitinfo.SourceGit,
+		Branch:       "main",
+		Dirty:        boolPtr(true),
 	}
 	m := New("0.1.0", "assets/templates", "sha256:abc", "alice", gi)
 	if m.Git.Commit != "abc123" {
@@ -50,8 +62,11 @@ func TestNew_Git(t *testing.T) {
 	if m.Git.Branch != "main" {
 		t.Errorf("Git.Branch = %q, want %q", m.Git.Branch, "main")
 	}
-	if !m.Git.Dirty {
-		t.Error("Git.Dirty = false, want true")
+	if m.Git.Dirty == nil || !*m.Git.Dirty {
+		t.Error("Git.Dirty should be true")
+	}
+	if m.Git.CommitSource != gitinfo.SourceGit {
+		t.Errorf("Git.CommitSource = %q, want %q", m.Git.CommitSource, gitinfo.SourceGit)
 	}
 }
 
@@ -80,7 +95,7 @@ func TestWriteFile_CreatesJSON(t *testing.T) {
 		SchemaVersion: 1,
 		Tool:          Tool{Name: "artemis", Version: "0.1.0"},
 		Source:        Source{TemplatesDir: "assets/templates", Hash: "sha256:abc"},
-		Git:           Git{Commit: "abc123", Branch: "main", Dirty: false},
+		Git:           Git{Commit: "abc123", CommitSource: gitinfo.SourceGit, Branch: "main", Dirty: boolPtr(false)},
 		Build:         Build{Timestamp: "2026-04-15T12:34:56Z", Initiator: "alice"},
 	}
 
@@ -116,8 +131,8 @@ func TestWriteFile_CreatesJSON(t *testing.T) {
 	if got.Git.Branch != "main" {
 		t.Errorf("Git.Branch = %q, want %q", got.Git.Branch, "main")
 	}
-	if got.Git.Dirty {
-		t.Error("Git.Dirty = true, want false")
+	if got.Git.Dirty == nil || *got.Git.Dirty {
+		t.Error("Git.Dirty should round-trip as false")
 	}
 	if got.Build.Timestamp != "2026-04-15T12:34:56Z" {
 		t.Errorf("Build.Timestamp = %q, want %q", got.Build.Timestamp, "2026-04-15T12:34:56Z")
@@ -180,17 +195,17 @@ func TestWriteFile_ErrorOnBadDir(t *testing.T) {
 }
 
 func TestNew_GitDirtyFalse(t *testing.T) {
-	gi := gitinfo.Info{Commit: "abc", Branch: "main", Dirty: false}
+	gi := gitinfo.Info{Commit: "abc", Branch: "main", Dirty: boolPtr(false)}
 	m := New("0.1.0", "assets/templates", "sha256:abc", "alice", gi)
-	if m.Git.Dirty {
-		t.Error("Git.Dirty = true, want false")
+	if m.Git.Dirty == nil || *m.Git.Dirty {
+		t.Error("Git.Dirty should be false")
 	}
 }
 
 func TestWriteFile_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 
-	gi := gitinfo.Info{Commit: "deadbeef", Branch: "feature/x", Dirty: true}
+	gi := gitinfo.Info{Commit: "deadbeef", CommitSource: gitinfo.SourceGit, Branch: "feature/x", Dirty: boolPtr(true)}
 	original := New("2.0.0", "my/templates", "sha256:cafebabe", "ci-bot", gi)
 
 	if err := WriteFile(dir, original); err != nil {
@@ -217,7 +232,10 @@ func TestWriteFile_RoundTrip(t *testing.T) {
 	if roundTripped.Source != original.Source {
 		t.Errorf("Source = %+v, want %+v", roundTripped.Source, original.Source)
 	}
-	if roundTripped.Git != original.Git {
+	if roundTripped.Git.Commit != original.Git.Commit ||
+		roundTripped.Git.CommitSource != original.Git.CommitSource ||
+		roundTripped.Git.Branch != original.Git.Branch ||
+		!sameDirty(roundTripped.Git.Dirty, original.Git.Dirty) {
 		t.Errorf("Git = %+v, want %+v", roundTripped.Git, original.Git)
 	}
 	if roundTripped.Build != original.Build {

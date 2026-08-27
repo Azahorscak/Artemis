@@ -74,13 +74,18 @@ func run(cfg Config) error {
 
 	// 4. Render templates into output dir.
 	ctx := render.TemplateCtx{
-		GitCommit: gi.Commit,
-		GitBranch: gi.Branch,
-		GitDirty:  gi.Dirty,
-		Timestamp: time.Now().UTC(),
-		Initiator: cfg.Initiator,
-		Version:   cfg.Version,
-		Env:       nil, // no explicit env allowlist; templates may still call the env() helper
+		GitCommit:       gi.Commit,
+		GitCommitSource: gi.CommitSource,
+		GitBranch:       gi.Branch,
+		// Collapse the tri-state for templates: unknown renders as "not known
+		// dirty" rather than as a positive claim either way. GitDirtyKnown lets
+		// a template distinguish "clean" from "never inspected".
+		GitDirty:      gi.Dirty != nil && *gi.Dirty,
+		GitDirtyKnown: gi.Dirty != nil,
+		Timestamp:     time.Now().UTC(),
+		Initiator:     cfg.Initiator,
+		Version:       cfg.Version,
+		Env:           nil, // no explicit env allowlist; templates may still call the env() helper
 	}
 	if err := render.Render(cfg.TemplatesDir, cfg.OutputDir, ctx); err != nil {
 		return fmt.Errorf("rendering templates: %w", err)

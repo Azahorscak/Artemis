@@ -3,6 +3,7 @@ package render
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -18,13 +19,27 @@ import (
 // TemplateCtx holds the data available to every template.
 // All fields are exported so text/template can access them by name (e.g. {{.GitCommit}}).
 type TemplateCtx struct {
-	GitCommit string            // full SHA-1 commit hash, or empty if unavailable
-	GitBranch string            // branch name (e.g. "main"), or empty on detached HEAD
-	GitDirty  bool              // true when the working tree has uncommitted changes
-	Timestamp time.Time         // UTC build time; use {{.Timestamp.Format "2006-01-02"}} in templates
-	Initiator string            // identity of whoever triggered the build
-	Version   string            // binary version string set via ldflags
-	Env       map[string]string // optional allowlisted env vars; nil means none pre-populated
+	GitCommit string // full SHA-1 commit hash, or empty if unavailable
+	// GitCommitSource records where GitCommit came from: "git", "env:<VAR>"
+	// when an environment variable supplied it (unverified — nothing confirms
+	// it describes this tree), or "unknown".
+	GitCommitSource string
+	GitBranch       string // branch name (e.g. "main"), or empty on detached HEAD
+	// GitDirty is true only when the working tree was inspected and found
+	// dirty. It is false both for a clean tree and for one that could not be
+	// inspected, so {{.GitDirty}} never asserts "dirty" on unknown information.
+	// Templates that must tell those two cases apart check GitDirtyKnown, which
+	// is false only when the state is undetermined.
+	//
+	// This is deliberately a pair of bools rather than a *bool: text/template
+	// treats any non-nil pointer as truthy, so with a *bool a clean tree would
+	// make {{if .GitDirty}} report it as dirty.
+	GitDirty      bool
+	GitDirtyKnown bool
+	Timestamp     time.Time         // UTC build time; use {{.Timestamp.Format "2006-01-02"}} in templates
+	Initiator     string            // identity of whoever triggered the build
+	Version       string            // binary version string set via ldflags
+	Env           map[string]string // optional allowlisted env vars; nil means none pre-populated
 }
 
 // FuncMap returns the helper functions registered for templates.
@@ -83,6 +98,15 @@ func Render(templatesDir, outputDir string, ctx TemplateCtx) error {
 			return os.MkdirAll(destPath, 0o755)
 		}
 
+		// WalkDir reports symlinks without following them. Opening such an entry
+		// by path reads through the link, so a symlink planted in the templates
+		// tree would copy a file from anywhere on disk into the output. Irregular
+		// entries are also hazards in their own right — a FIFO would block
+		// copyFile forever. hash.Dir rejects the same entries.
+		if !d.Type().IsRegular() {
+			return fmt.Errorf("refusing to render irregular file %s (mode %v)", path, d.Type())
+		}
+
 		info, err := d.Info()
 		if err != nil {
 			return fmt.Errorf("stat %s: %w", path, err)
@@ -107,13 +131,9 @@ func renderTemplate(src, dst string, mode fs.FileMode, ctx TemplateCtx) error {
 		return fmt.Errorf("parsing template %s: %w", src, err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return fmt.Errorf("creating parent dir for %s: %w", dst, err)
-	}
-
-	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	f, err := createOutput(dst, mode)
 	if err != nil {
-		return fmt.Errorf("creating %s: %w", dst, err)
+		return err
 	}
 	defer f.Close()
 
@@ -124,6 +144,30 @@ func renderTemplate(src, dst string, mode fs.FileMode, ctx TemplateCtx) error {
 	return nil
 }
 
+// createOutput opens dst for writing, refusing to follow a pre-existing symlink.
+//
+// O_CREATE|O_TRUNC alone follows a symlink at dst and writes through it, so a
+// link planted in the output directory redirects a rendered file anywhere the
+// process can write. Unlinking first drops the link itself rather than its
+// target, and O_EXCL then closes the gap: if anything reappears at dst before
+// the open — symlink or not — the create fails instead of writing through it.
+func createOutput(dst string, mode fs.FileMode) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return nil, fmt.Errorf("creating parent dir for %s: %w", dst, err)
+	}
+
+	if err := os.Remove(dst); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("clearing existing output path %s: %w", dst, err)
+	}
+
+	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		return nil, fmt.Errorf("creating %s: %w", dst, err)
+	}
+
+	return f, nil
+}
+
 // copyFile copies src to dst byte-for-byte, preserving the original file mode.
 func copyFile(src, dst string, mode fs.FileMode) error {
 	in, err := os.Open(src)
@@ -132,13 +176,9 @@ func copyFile(src, dst string, mode fs.FileMode) error {
 	}
 	defer in.Close()
 
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return fmt.Errorf("creating parent dir for %s: %w", dst, err)
-	}
-
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	out, err := createOutput(dst, mode)
 	if err != nil {
-		return fmt.Errorf("creating %s: %w", dst, err)
+		return err
 	}
 	defer out.Close()
 

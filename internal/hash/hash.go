@@ -19,6 +19,11 @@ type entry struct {
 	hash    string // hex-encoded SHA-256 of file contents
 }
 
+// formatVersion is written once at the head of the aggregate so that a future
+// change to the record encoding produces visibly different digests instead of
+// silently colliding with digests computed by an older version.
+const formatVersion = "artemis-dirhash-v1\n"
+
 // Dir computes a deterministic SHA-256 hash over all files in dir.
 // It walks the directory, collecting (relpath, mode, sha256(content)) tuples,
 // sorts them by relative path, and hashes the sorted list to produce a single
@@ -32,6 +37,15 @@ func Dir(dir string) (string, error) {
 		}
 		if d.IsDir() {
 			return nil
+		}
+
+		// WalkDir reports symlinks without following them, so an entry can be a
+		// symlink, device, socket or FIFO. fileHash opens by path and would read
+		// *through* such an entry, folding a file from outside dir into the
+		// digest. Fail rather than skip: a digest that silently omits part of the
+		// tree is worse than no digest. render.Render rejects the same entries.
+		if !d.Type().IsRegular() {
+			return fmt.Errorf("refusing to hash irregular file %s (mode %v)", path, d.Type())
 		}
 
 		rel, err := filepath.Rel(dir, path)
@@ -66,10 +80,18 @@ func Dir(dir string) (string, error) {
 	})
 
 	aggregate := sha256.New()
+	fmt.Fprint(aggregate, formatVersion)
 	for _, e := range entries {
-		// Each line encodes: "<relpath> <octal-mode> <sha256-hex>\n"
+		// Each line encodes: "<len(relpath)>:<relpath> <octal-mode> <sha256-hex>\n"
 		// Including the file mode means a chmod alone changes the aggregate hash.
-		fmt.Fprintf(aggregate, "%s %o %s\n", e.relPath, e.mode, e.hash)
+		//
+		// The length prefix is what makes the encoding injective. Without it the
+		// fields are separated only by a space and a newline, both legal in a
+		// filename, so one file could be named so that its record reproduced the
+		// records of several ordinary files — distinct trees hashing identically.
+		// The prefix fixes the path boundary, so a record can no longer be forged
+		// out of a path's contents.
+		fmt.Fprintf(aggregate, "%d:%s %o %s\n", len(e.relPath), e.relPath, e.mode, e.hash)
 	}
 
 	return "sha256:" + hex.EncodeToString(aggregate.Sum(nil)), nil
