@@ -237,3 +237,36 @@ func TestRun_FailFastOnBadTemplate(t *testing.T) {
 		t.Fatal("expected error for invalid template, got nil")
 	}
 }
+
+func TestRun_TemplateAndMetadataShareTimestamp(t *testing.T) {
+	// Rendered files and metadata.json must report the same build instant.
+	tmplDir := t.TempDir()
+	tmpl := `{{ .Timestamp.Format "2006-01-02T15:04:05Z07:00" }}`
+	if err := os.WriteFile(filepath.Join(tmplDir, "ts.txt.tmpl"), []byte(tmpl), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outDir := t.TempDir()
+	cfg := Config{TemplatesDir: tmplDir, OutputDir: outDir, Initiator: "x", Version: "dev"}
+	if err := run(cfg); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	rendered, err := os.ReadFile(filepath.Join(outDir, "ts.txt"))
+	if err != nil {
+		t.Fatalf("reading rendered output: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(outDir, "metadata.json"))
+	if err != nil {
+		t.Fatalf("reading metadata.json: %v", err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatalf("unmarshal metadata.json: %v", err)
+	}
+
+	got := m["build"].(map[string]any)["timestamp"]
+	if got != string(rendered) {
+		t.Errorf("metadata build.timestamp = %v, rendered timestamp = %q", got, rendered)
+	}
+}

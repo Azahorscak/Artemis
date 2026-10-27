@@ -2,7 +2,7 @@ Artemis build output
 ====================
 Commit:    {{ .GitCommit }}
 Branch:    {{ .GitBranch }}
-Dirty:     {{ .GitDirty }}
+Dirty:     {{ if .GitDirtyKnown }}{{ .GitDirty }}{{ else }}unknown{{ end }}
 Timestamp: {{ .Timestamp }}
 Initiator: {{ .Initiator }}
 Version:   {{ .Version }}

@@ -3,11 +3,12 @@ package metadata
 
 import (
 	"encoding/json"
-	"os"
+	"fmt"
 	"path/filepath"
 	"time"
 
 	"github.com/azahorscak/artemis/internal/gitinfo"
+	"github.com/azahorscak/artemis/internal/safefile"
 )
 
 // TODO(metadata): add outputs[]{path,sha256} with per-file hashes
@@ -55,8 +56,9 @@ type Build struct {
 }
 
 // New creates a Metadata value from the provided inputs.
-// The timestamp is set to the current UTC time in RFC 3339 format.
-func New(version, templatesDir, hash, initiator string, gi gitinfo.Info) Metadata {
+// ts is recorded in UTC, RFC 3339 format. Callers pass the same instant the
+// templates were rendered with, so metadata.json and the rendered files agree.
+func New(version, templatesDir, hash, initiator string, gi gitinfo.Info, ts time.Time) Metadata {
 	return Metadata{
 		SchemaVersion: 1,
 		Tool: Tool{
@@ -74,7 +76,7 @@ func New(version, templatesDir, hash, initiator string, gi gitinfo.Info) Metadat
 			Dirty:        copyBool(gi.Dirty),
 		},
 		Build: Build{
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
+			Timestamp: ts.UTC().Format(time.RFC3339),
 			Initiator: initiator,
 		},
 	}
@@ -91,12 +93,24 @@ func copyBool(b *bool) *bool {
 }
 
 // WriteFile writes the metadata as indented JSON to outputDir/metadata.json.
-// The file always ends with a trailing newline for POSIX compliance.
+// The file always ends with a trailing newline for POSIX compliance. Like the
+// rendered files, it is created via safefile so a symlink planted at
+// metadata.json is replaced rather than written through.
 func WriteFile(outputDir string, m Metadata) error {
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
 	data = append(data, '\n') // POSIX: text files must end with a newline
-	return os.WriteFile(filepath.Join(outputDir, "metadata.json"), data, 0o644)
+
+	path := filepath.Join(outputDir, "metadata.json")
+	f, err := safefile.Create(path, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	return f.Close()
 }

@@ -72,6 +72,10 @@ func run(cfg Config) error {
 	// 3. Collect git info so templates can reference commit/branch/dirty.
 	gi := gitinfo.Collect(".")
 
+	// One build instant shared by templates and metadata.json, so both report
+	// the same time.
+	now := time.Now().UTC()
+
 	// 4. Render templates into output dir.
 	ctx := render.TemplateCtx{
 		GitCommit:       gi.Commit,
@@ -82,7 +86,7 @@ func run(cfg Config) error {
 		// a template distinguish "clean" from "never inspected".
 		GitDirty:      gi.Dirty != nil && *gi.Dirty,
 		GitDirtyKnown: gi.Dirty != nil,
-		Timestamp:     time.Now().UTC(),
+		Timestamp:     now,
 		Initiator:     cfg.Initiator,
 		Version:       cfg.Version,
 		Env:           nil, // no explicit env allowlist; templates may still call the env() helper
@@ -92,7 +96,7 @@ func run(cfg Config) error {
 	}
 
 	// 5. Write metadata.json last so it is excluded from the source hash.
-	meta := metadata.New(cfg.Version, cfg.TemplatesDir, sourceHash, cfg.Initiator, gi)
+	meta := metadata.New(cfg.Version, cfg.TemplatesDir, sourceHash, cfg.Initiator, gi, now)
 	if err := metadata.WriteFile(cfg.OutputDir, meta); err != nil {
 		return fmt.Errorf("writing metadata: %w", err)
 	}
