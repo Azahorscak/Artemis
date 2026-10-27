@@ -29,3 +29,15 @@ command = '''
     --initiator     "${FLOX_BUILD_INITIATOR:-${USER:-flox}}"
 '''
 sandbox = "off"
+
+[build.demo-env]
+description = "Demo flox + kind environment with a kubectl-applyable app"
+runtime-packages = ["artemis", "git"]
+command = '''
+  mkdir -p "$out"
+  artemis \
+    --templates-dir "./assets/demo-env" \
+    --output-dir    "$out" \
+    --initiator     "${FLOX_BUILD_INITIATOR:-${USER:-flox}}"
+'''
+sandbox = "off"

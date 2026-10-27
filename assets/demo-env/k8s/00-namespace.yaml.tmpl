@@ -1,0 +1,7 @@
+{{- $namespace := env "DEMO_NAMESPACE" | default "artemis-demo" -}}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $namespace }}
+  labels:
+    app.kubernetes.io/managed-by: artemis

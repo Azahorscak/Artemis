@@ -1,0 +1,56 @@
+{{- $namespace := env "DEMO_NAMESPACE" | default "artemis-demo" -}}
+{{- $image := env "DEMO_IMAGE" | default "nginxinc/nginx-unprivileged:1.27-alpine" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  namespace: {{ $namespace }}
+  labels:
+    app.kubernetes.io/name: demo-app
+    app.kubernetes.io/managed-by: artemis
+  annotations:
+    artemis/git-commit: {{ .GitCommit | default "unknown" | toJson }}
+    artemis/git-branch: {{ .GitBranch | default "unknown" | toJson }}
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: demo-app
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: demo-app
+      annotations:
+        # Changes on every render, so re-applying rolls pods onto the new ConfigMap.
+        artemis/rendered-at: {{ .Timestamp.Format "2006-01-02T15:04:05Z07:00" | toJson }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: web
+          image: {{ $image }}
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: content
+              mountPath: /usr/share/nginx/html
+              readOnly: true
+      volumes:
+        - name: content
+          configMap:
+            name: demo-app-content

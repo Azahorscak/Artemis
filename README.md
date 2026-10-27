@@ -37,6 +37,31 @@ flox build artemis          # compile the binary
 flox build artemis-output   # render templates; result lands in result-artemis-output/
 ```
 
+## Demo environment
+
+`assets/demo-env/` is a template set that renders a self-contained demo: a
+Flox environment providing `kind` and `kubectl`, a kind cluster config, and a
+small nginx app under `k8s/` ready for `kubectl apply`. A templated README in
+the output explains the remaining steps (Docker/Podman prerequisite, copying
+the result somewhere writable, cleanup).
+
+```sh
+flox build demo-env        # result lands in result-demo-env/
+# or, without flox build:
+go run ./cmd/artemis --templates-dir assets/demo-env --output-dir build/demo-env
+```
+
+Then, from a writable copy of the output:
+
+```sh
+flox activate              # creates the kind cluster on first activation
+k apply -f k8s/
+open http://localhost:8080
+```
+
+Set `DEMO_CLUSTER_NAME`, `DEMO_NAMESPACE`, `DEMO_HOST_PORT` or `DEMO_IMAGE`
+at render time to customise the output.
+
 ## Adding new templates
 
 1. Create a file inside `assets/templates/` with a `.tmpl` extension, e.g.
