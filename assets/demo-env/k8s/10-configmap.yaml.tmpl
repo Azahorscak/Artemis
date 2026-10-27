@@ -1,0 +1,26 @@
+{{- $namespace := env "DEMO_NAMESPACE" | default "artemis-demo" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: demo-app-content
+  namespace: {{ $namespace }}
+  labels:
+    app.kubernetes.io/name: demo-app
+    app.kubernetes.io/managed-by: artemis
+data:
+  index.html: |
+    <!doctype html>
+    <html>
+      <head><meta charset="utf-8"><title>Artemis demo</title></head>
+      <body>
+        <h1>Hello from the Artemis demo app</h1>
+        <table>
+          <tr><th align="left">Commit</th><td>{{ .GitCommit | default "unknown" }}</td></tr>
+          <tr><th align="left">Branch</th><td>{{ .GitBranch | default "unknown" }}</td></tr>
+          <tr><th align="left">Dirty</th><td>{{ if .GitDirtyKnown }}{{ .GitDirty }}{{ else }}unknown{{ end }}</td></tr>
+          <tr><th align="left">Rendered</th><td>{{ .Timestamp.Format "2006-01-02T15:04:05Z07:00" }}</td></tr>
+          <tr><th align="left">Initiator</th><td>{{ .Initiator }}</td></tr>
+          <tr><th align="left">Artemis</th><td>{{ .Version }}</td></tr>
+        </table>
+      </body>
+    </html>

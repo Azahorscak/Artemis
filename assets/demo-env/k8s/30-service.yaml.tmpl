@@ -1,0 +1,19 @@
+{{- $namespace := env "DEMO_NAMESPACE" | default "artemis-demo" -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-app
+  namespace: {{ $namespace }}
+  labels:
+    app.kubernetes.io/name: demo-app
+    app.kubernetes.io/managed-by: artemis
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: demo-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      # Must match containerPort in kind-config.yaml.
+      nodePort: 30080
