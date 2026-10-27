@@ -3,7 +3,6 @@ package render
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -14,6 +13,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/azahorscak/artemis/internal/safefile"
 )
 
 // TemplateCtx holds the data available to every template.
@@ -144,28 +145,14 @@ func renderTemplate(src, dst string, mode fs.FileMode, ctx TemplateCtx) error {
 	return nil
 }
 
-// createOutput opens dst for writing, refusing to follow a pre-existing symlink.
-//
-// O_CREATE|O_TRUNC alone follows a symlink at dst and writes through it, so a
-// link planted in the output directory redirects a rendered file anywhere the
-// process can write. Unlinking first drops the link itself rather than its
-// target, and O_EXCL then closes the gap: if anything reappears at dst before
-// the open — symlink or not — the create fails instead of writing through it.
+// createOutput creates dst's parent directories, then opens dst via
+// safefile.Create so a symlink planted in the output tree is never written
+// through.
 func createOutput(dst string, mode fs.FileMode) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return nil, fmt.Errorf("creating parent dir for %s: %w", dst, err)
 	}
-
-	if err := os.Remove(dst); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("clearing existing output path %s: %w", dst, err)
-	}
-
-	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
-	if err != nil {
-		return nil, fmt.Errorf("creating %s: %w", dst, err)
-	}
-
-	return f, nil
+	return safefile.Create(dst, mode)
 }
 
 // copyFile copies src to dst byte-for-byte, preserving the original file mode.

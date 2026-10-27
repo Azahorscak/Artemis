@@ -10,6 +10,9 @@ import (
 	"github.com/azahorscak/artemis/internal/gitinfo"
 )
 
+// testTime is a fixed build instant for tests that don't inspect the timestamp.
+var testTime = time.Date(2026, 4, 15, 12, 34, 56, 0, time.UTC)
+
 // boolPtr returns a pointer to v, for building tri-state Dirty values.
 func boolPtr(v bool) *bool { return &v }
 
@@ -22,14 +25,14 @@ func sameDirty(a, b *bool) bool {
 }
 
 func TestNew_SchemaVersion(t *testing.T) {
-	m := New("0.1.0", "assets/templates", "sha256:abc", "alice", gitinfo.Info{})
+	m := New("0.1.0", "assets/templates", "sha256:abc", "alice", gitinfo.Info{}, testTime)
 	if m.SchemaVersion != 1 {
 		t.Errorf("SchemaVersion = %d, want 1", m.SchemaVersion)
 	}
 }
 
 func TestNew_Tool(t *testing.T) {
-	m := New("1.2.3", "assets/templates", "sha256:abc", "alice", gitinfo.Info{})
+	m := New("1.2.3", "assets/templates", "sha256:abc", "alice", gitinfo.Info{}, testTime)
 	if m.Tool.Name != "artemis" {
 		t.Errorf("Tool.Name = %q, want %q", m.Tool.Name, "artemis")
 	}
@@ -39,7 +42,7 @@ func TestNew_Tool(t *testing.T) {
 }
 
 func TestNew_Source(t *testing.T) {
-	m := New("0.1.0", "assets/templates", "sha256:deadbeef", "alice", gitinfo.Info{})
+	m := New("0.1.0", "assets/templates", "sha256:deadbeef", "alice", gitinfo.Info{}, testTime)
 	if m.Source.TemplatesDir != "assets/templates" {
 		t.Errorf("Source.TemplatesDir = %q, want %q", m.Source.TemplatesDir, "assets/templates")
 	}
@@ -55,7 +58,7 @@ func TestNew_Git(t *testing.T) {
 		Branch:       "main",
 		Dirty:        boolPtr(true),
 	}
-	m := New("0.1.0", "assets/templates", "sha256:abc", "alice", gi)
+	m := New("0.1.0", "assets/templates", "sha256:abc", "alice", gi, testTime)
 	if m.Git.Commit != "abc123" {
 		t.Errorf("Git.Commit = %q, want %q", m.Git.Commit, "abc123")
 	}
@@ -71,20 +74,16 @@ func TestNew_Git(t *testing.T) {
 }
 
 func TestNew_Build(t *testing.T) {
-	before := time.Now().UTC().Truncate(time.Second)
-	m := New("0.1.0", "assets/templates", "sha256:abc", "flox-build:alice", gitinfo.Info{})
-	after := time.Now().UTC().Truncate(time.Second).Add(time.Second)
+	// A non-UTC input must still be recorded in UTC.
+	ts := time.Date(2026, 4, 15, 14, 34, 56, 0, time.FixedZone("CEST", 2*60*60))
+	m := New("0.1.0", "assets/templates", "sha256:abc", "flox-build:alice", gitinfo.Info{}, ts)
 
 	if m.Build.Initiator != "flox-build:alice" {
 		t.Errorf("Build.Initiator = %q, want %q", m.Build.Initiator, "flox-build:alice")
 	}
 
-	ts, err := time.Parse(time.RFC3339, m.Build.Timestamp)
-	if err != nil {
-		t.Fatalf("Build.Timestamp %q is not valid RFC3339: %v", m.Build.Timestamp, err)
-	}
-	if ts.Before(before) || ts.After(after) {
-		t.Errorf("Build.Timestamp %v not between %v and %v", ts, before, after)
+	if want := "2026-04-15T12:34:56Z"; m.Build.Timestamp != want {
+		t.Errorf("Build.Timestamp = %q, want %q", m.Build.Timestamp, want)
 	}
 }
 
@@ -196,7 +195,7 @@ func TestWriteFile_ErrorOnBadDir(t *testing.T) {
 
 func TestNew_GitDirtyFalse(t *testing.T) {
 	gi := gitinfo.Info{Commit: "abc", Branch: "main", Dirty: boolPtr(false)}
-	m := New("0.1.0", "assets/templates", "sha256:abc", "alice", gi)
+	m := New("0.1.0", "assets/templates", "sha256:abc", "alice", gi, testTime)
 	if m.Git.Dirty == nil || *m.Git.Dirty {
 		t.Error("Git.Dirty should be false")
 	}
@@ -206,7 +205,7 @@ func TestWriteFile_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 
 	gi := gitinfo.Info{Commit: "deadbeef", CommitSource: gitinfo.SourceGit, Branch: "feature/x", Dirty: boolPtr(true)}
-	original := New("2.0.0", "my/templates", "sha256:cafebabe", "ci-bot", gi)
+	original := New("2.0.0", "my/templates", "sha256:cafebabe", "ci-bot", gi, testTime)
 
 	if err := WriteFile(dir, original); err != nil {
 		t.Fatalf("WriteFile() error: %v", err)
@@ -240,5 +239,40 @@ func TestWriteFile_RoundTrip(t *testing.T) {
 	}
 	if roundTripped.Build != original.Build {
 		t.Errorf("Build = %+v, want %+v", roundTripped.Build, original.Build)
+	}
+}
+
+func TestWriteFile_DoesNotWriteThroughSymlink(t *testing.T) {
+	// A symlink planted at metadata.json must not redirect the write to its
+	// target, matching render's handling of the other output files.
+	victim := filepath.Join(t.TempDir(), "victim.txt")
+	if err := os.WriteFile(victim, []byte("ORIGINAL"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	if err := os.Symlink(victim, filepath.Join(dir, "metadata.json")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	m := New("0.1.0", "assets/templates", "sha256:abc", "alice", gitinfo.Info{}, testTime)
+	if err := WriteFile(dir, m); err != nil {
+		t.Fatalf("WriteFile() error: %v", err)
+	}
+
+	got, err := os.ReadFile(victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "ORIGINAL" {
+		t.Errorf("file outside dir was overwritten: got %q, want %q", got, "ORIGINAL")
+	}
+
+	fi, err := os.Lstat(filepath.Join(dir, "metadata.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fi.Mode().IsRegular() {
+		t.Errorf("metadata.json mode = %v, want regular file", fi.Mode())
 	}
 }
